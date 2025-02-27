@@ -5,12 +5,9 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
-using System.Web;
-using System.Security.Policy;
-using System.IO;
 
-namespace LLama.Rag;
-
+namespace LLama.Rag
+{
     class WebScraper
     {
         private static readonly HttpClient httpClient = new HttpClient();
@@ -31,21 +28,20 @@ namespace LLama.Rag;
         public static async Task<WebScraper> CreateAsync(string url, int queryDepth)
         {
             WebScraper instance = new WebScraper();
-            await instance.FetchContentAsynch(url,queryDepth);
+            await instance.FetchContentAsynch(url, queryDepth);
             return instance;
         }
 
         private async Task FetchContentAsynch(string url, int queryDepth)
         {
             if (queryDepth < 0 || visitedUrls.Contains(url)) return;
-    
+
             try
-            {   
+            {
                 visitedUrls.Add(url);
                 string pageContent = await httpClient.GetStringAsync(url);
                 HtmlDocument doc = new HtmlDocument();
                 doc.LoadHtml(pageContent);
-                
                 documents.Add(doc);
 
 
@@ -59,9 +55,9 @@ namespace LLama.Rag;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error scraping {url}: {ex.Message}");
+                //Console.WriteLine($"Error scraping {url}: {ex.Message}");
             }
-        
+
         }
 
         private static List<string> ExtractLinks(HtmlDocument doc, string baseUrl)
@@ -75,7 +71,7 @@ namespace LLama.Rag;
                 .Distinct()
                 .ToList() ?? new List<string>();
 
-        
+
             return links;
         }
 
@@ -90,13 +86,13 @@ namespace LLama.Rag;
             return null;
         }
 
-    /// <summary>
-    /// Extracts all visible text from a webpage.
-    /// </summary>
-    /// <param name="minWordLength">Specifies the minimum number of words to in a group to collect, anything less is discarded</param>
-    /// <param name="checkSentences">Performs a rudimentary sentance check. Removes any text with strings of non-text or addresses</param>
-    /// <returns>Returns a list of strings List<strings></returns>
-    public List<string> ExtractVisibleText(int minWordLength, bool checkSentences, bool explodeParagraphs)
+        /// <summary>
+        /// Extracts all visible text from a webpage.
+        /// </summary>
+        /// <param name="minWordLength">Specifies the minimum number of words to in a group to collect, anything less is discarded</param>
+        /// <param name="checkSentences">Performs a rudimentary sentance check. Removes any text with strings of non-text or addresses</param>
+        /// <returns>Returns a list of strings List<strings></returns>
+        public List<string> ExtractVisibleText(int minWordLength, bool checkSentences, bool explodeParagraphs)
         {
             //Select all text from body node
             List<string> allDocumentText = new List<string>();
@@ -111,13 +107,13 @@ namespace LLama.Rag;
 
                         // Remove newlines, tabs, and extra spaces
                         cleanedText = cleanedText.Replace("\t", " "); // Replace tabs with space
-                        //cleanedText = cleanedText.Replace("\n", ""); // Replaces newlines nothing
+                                                                      //cleanedText = cleanedText.Replace("\n", ""); // Replaces newlines nothing
                         cleanedText = Regex.Replace(cleanedText, @"\s+", " "); // Replace multiple spaces with one
 
                         // Apply additional regex (e.g., remove unwanted characters)
                         //cleanedText = Regex.Replace(cleanedText, @"[^a-zA-Z0-9\s]", ""); // Remove non-alphanumeric character
-                        
-                     
+
+
                         return cleanedText;
                     })
                     .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
@@ -126,14 +122,15 @@ namespace LLama.Rag;
                 allDocumentText.AddRange(currentDocText);
             }
 
-            if (explodeParagraphs) allDocumentText = ExplodeParagraphs(allDocumentText, minWordLength);
             if (checkSentences) allDocumentText = RudimentarySentenceCheck(allDocumentText);
+            if (explodeParagraphs) allDocumentText = ExplodeParagraphs(allDocumentText, minWordLength);
             return allDocumentText;
         }
         public List<string> ExtractParagraphs()
         {
             List<string> paragraphs = new List<string>();
-            foreach (HtmlDocument doc in documents) {
+            foreach (HtmlDocument doc in documents)
+            {
                 //Select all text from body node
                 var currentDocParagraph = doc.DocumentNode
                     .SelectNodes("//p//text()")?
@@ -151,12 +148,12 @@ namespace LLama.Rag;
         {
             // Define regex patterns within the method
             List<Regex> sentenceRules = new List<Regex>
-        {
-                new Regex(@"^[A-Za-z0-9]+[\w\s,;:'""-]*", RegexOptions.Compiled | RegexOptions.IgnoreCase), // Contains valid words, no gibberish
-                new Regex(@"[^\W]{2,}", RegexOptions.Compiled), //Removes sequences of non-word characters
-                new Regex(@"\b(\w*:?[/\w\d]+\.){2,}\d+\b", RegexOptions.Compiled) //Remove iP and other adresses 
+    {
+            new Regex(@"^[A-Za-z0-9]+[\w\s,;:'""-]*", RegexOptions.Compiled | RegexOptions.IgnoreCase), // Contains valid words, no gibberish
+            new Regex(@"[^\W]{2,}", RegexOptions.Compiled), //Removes sequences of non-word characters
+            new Regex(@"\b(\w*:?[/\w\d]+\.){2,}\d+\b", RegexOptions.Compiled) //Remove iP and other adresses 
 
-            };
+        };
 
             List<string> cleanedSentences = new List<string>();
 
@@ -179,10 +176,11 @@ namespace LLama.Rag;
                 List<string> paragraphSentences = Regex.Matches(paragraph, @"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\s|^)([A-Z0-9][^.!?]*[.!?])")
                                      .Cast<Match>()  // Convert MatchCollection to IEnumerable<Match>
                                      .Select(m => m.Value.Trim())  // Extract matched text
+                                     .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
                                      .ToList();
                 allSentences.AddRange(paragraphSentences);
             }
             return allSentences;
         }
-
     }
+}
