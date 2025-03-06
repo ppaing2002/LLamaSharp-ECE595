@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using System.Web;
+using System.Data;
+using System.Reflection;
 
 namespace LLama.Rag
 {
@@ -14,6 +16,7 @@ namespace LLama.Rag
         private static readonly HttpClient httpClient = new HttpClient();
         public HashSet<string> VisitedUrls { get; } = new HashSet<string>();
         public List<HtmlDocument> Documents { get; } = new List<HtmlDocument>();
+        public List<IWebScraper.WebsiteData> Websites { get; } = new List<IWebScraper.WebsiteData>();
 
         private WebScraper() { }
 
@@ -34,7 +37,19 @@ namespace LLama.Rag
                 string pageContent = await httpClient.GetStringAsync(url);
                 HtmlDocument doc = new HtmlDocument();
                 doc.LoadHtml(pageContent);
-                Documents.Add(doc);
+
+
+                var titleNode = doc.DocumentNode.SelectSingleNode("//title");
+                string title = titleNode != null ? titleNode.InnerHtml : "N/A";
+
+                IWebScraper.WebsiteData site = new IWebScraper.WebsiteData()
+                {
+                    Url = url,
+                    Document = doc,
+                    Title = title,
+                    Links = ExtractLinks(doc, url)
+                };
+                Websites.Add(site);
 
                 if (queryDepth > 0)
                 {
@@ -48,8 +63,8 @@ namespace LLama.Rag
                 Console.WriteLine($"Error scraping {url}: {ex.Message}");
             }
         }
-
-        private static List<string> ExtractLinks(HtmlDocument doc, string baseUrl)
+        
+        public static List<string> ExtractLinks(HtmlDocument doc, string baseUrl)
         {
             return doc.DocumentNode
                 .SelectNodes("//body//a[@href]")?
@@ -61,6 +76,7 @@ namespace LLama.Rag
                 .ToList() ?? new List<string>();
         }
 
+        
         private static string NormalizeUrl(string href, string baseUrl)
         {
             if (href.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -72,14 +88,11 @@ namespace LLama.Rag
             return null;
         }
 
-        public async Task<List<string>> ExtractVisibleTextAsync(int minWordLength, bool checkSentences, bool explodeParagraphs)
+        public async Task<List<string>> ExtractVisibleTextAsync(IWebScraper.WebsiteData site, int minWordLength, bool checkSentences, bool explodeParagraphs)
         {
             return await Task.Run(() =>
             {
-                List<string> allDocumentText = new List<string>();
-                foreach (HtmlDocument doc in Documents)
-                {
-                    var currentDocText = doc.DocumentNode
+                    var DocumentText = site.Document.DocumentNode
                         .SelectNodes("//body//*[not(ancestor::table) and not(self::script or self::style)] | //body//a[not(self::script or self::style)]")?
                         .Select(node =>
                         {
@@ -91,32 +104,29 @@ namespace LLama.Rag
                         .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
                         .ToList() ?? new List<string>();
 
-                    allDocumentText.AddRange(currentDocText);
-                }
+                 
+                
 
-                if (explodeParagraphs) allDocumentText = ExplodeParagraphs(allDocumentText, minWordLength);
-                if (checkSentences) allDocumentText = RudimentarySentenceCheck(allDocumentText);
+                if (explodeParagraphs) DocumentText = ExplodeParagraphs(DocumentText, minWordLength);
+                if (checkSentences) DocumentText = RudimentarySentenceCheck(DocumentText);
 
-                return allDocumentText.Distinct().ToList();
+                return DocumentText.Distinct().ToList();
             });
         }
 
-        public async Task<List<string>> ExtractParagraphsAsync(bool explodeParagraphs)
+        public async Task<List<string>> ExtractParagraphsAsync(IWebScraper.WebsiteData site, bool explodeParagraphs)
         {
             return await Task.Run(() =>
             {
-                List<string> paragraphs = new List<string>();
-                foreach (HtmlDocument doc in Documents)
-                {
-                    var currentDocParagraph = doc.DocumentNode
+                var DocParagraphs = site.Document.DocumentNode
                         .SelectNodes("//p//text()")?
                         .Select(node => HtmlEntity.DeEntitize(node.InnerText.Trim()))
                         .Where(text => !string.IsNullOrWhiteSpace(text))
                         .ToList() ?? new List<string>();
-                    paragraphs.AddRange(currentDocParagraph);
-                }
-                if (explodeParagraphs) paragraphs = ExplodeParagraphs(paragraphs, 1);
-                return paragraphs;
+                    
+                
+                if (explodeParagraphs) DocParagraphs = ExplodeParagraphs(DocParagraphs, 1);
+                return DocParagraphs;
             });
         }
 
@@ -142,5 +152,9 @@ namespace LLama.Rag
                         .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
                 .ToList();
         }
+
+        
+
+        
     }
 }
