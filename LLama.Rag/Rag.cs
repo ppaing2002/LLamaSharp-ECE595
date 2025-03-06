@@ -23,23 +23,24 @@ namespace LLama.Rag
 
             //initialiaze web scraper and scrape text elements from webpage
             WebScraper webScraper = await WebScraper.CreateAsync(startUrl, depth);
-            List<string> facts = webScraper.ExtractVisibleText(minWordLength, checkSentences, explodeParagraphs);
+            List<string> facts = await webScraper.ExtractVisibleTextAsync(minWordLength, checkSentences, explodeParagraphs);
 
 
             var modelparams = new ModelParams(modelPath)
             {
-                ContextSize = 512, // This can be changed by the user according to memory usage and model capability
+                ContextSize = 256, // This can be changed by the user according to memory usage and model capability
                 Embeddings = true, // This must be set to true to generate embeddings for vector search
-                GpuLayerCount = 0 // Set your number of layers to offload to the GPU here, depending on VRAM available (you can mix CPU with GPU for hybrid inference)
-
+                GpuLayerCount = 0, // Set your number of layers to offload to the GPU here, depending on VRAM available (you can mix CPU with GPU for hybrid inference)
+                BatchSize = 128, // This can be changed by the user according to memory usage constraints
+                UBatchSize = 128 // This should be changed if the batch size requested by the user is smaller than the default
             };
 
 
-            var model = LLamaWeights.LoadFromFile(modelparams);
+            var model = await LLamaWeights.LoadFromFileAsync(modelparams);
             var embedder = new LLamaEmbedder(model, modelparams);
             //Console.WriteLine($"\nModel: {fullModelName} from {modelPath} loaded\n");
 
-
+            
             //Create a data table to store the facts with their embeddings
             DataTable dt = new DataTable();
             dt.Columns.Add("Embedding", typeof(List<float[]>));
@@ -50,7 +51,7 @@ namespace LLama.Rag
             foreach (string fact in facts)
             {
 
-           
+          
                    if (embedder.Context.Tokenize(fact).Count() <= embedder.Context.BatchSize)
                    {
                        var embedding = await embedder.GetEmbeddings(fact);
@@ -67,7 +68,7 @@ namespace LLama.Rag
             string conversation = "";
             ChatSession session = new ChatSession(ex);
             Console.WriteLine("\n Please enter a query:\r\n");
-
+          
 
             //Chat loop
             while (true)
@@ -75,7 +76,7 @@ namespace LLama.Rag
                 string query = Console.ReadLine();
                 if (string.IsNullOrWhiteSpace(query)) break; // Easy way to quit out
                 var queryEmbeddings = await embedder.GetEmbeddings(query);
-               
+
 
 
                 // Compares embeddings to vector db and ranks by similarity
@@ -93,26 +94,39 @@ namespace LLama.Rag
                     .Take(n_top_matches)
                     .Select(row => row.Field<string>("Original text"))
                     .ToList();
-                
+
 
                 // Prepare prompt with original query and top n facts
-                prompt = $"Reply in a conversational manner utilizing the top facts in the prompt to answer only the user's specific question. Be a friendly but concise chatbot (do not offer extra, unrelated info) to help users learn more about the University of Denver. Query: {query}\n";
+                prompt = $"Reply in a conversational manner utilizing the top facts in the prompt to answer only the user's specific question. Be a friendly but concise chatbot (do not offer extra, unrelated info) to help users. Query: {query}\n";
                 for (int i = 0; i < topMatches.Count; i++)
                 {
                     prompt += $"Fact {i + 1}: {topMatches[i]}\n";
                 }
                 prompt += "Answer:";
 
-                // Execute conversation with modified prompt including top n matches
-                Console.WriteLine("\nQuerying database and processing with LLM...\n");
-                await foreach (var text in  session.ChatAsync(new ChatHistory.Message(AuthorRole.User, prompt), 
-                new InferenceParams { SamplingPipeline = new DefaultSamplingPipeline(){ Temperature = 0.25f }, AntiPrompts = ["DU Llama: Please enter a query:\r\n"] }))
+                var inferenceParams = new InferenceParams
                 {
+                    MaxTokens = 128,
+                    //AntiPrompts = ["DU Llama: Please enter a query:\r\n"],
+                    SamplingPipeline = new DefaultSamplingPipeline()
+                    {
+                        Temperature = 0.25f
+                    }
+
+                };
+
+                    // Execute conversation with modified prompt including top n matches
+                Console.WriteLine("\nQuerying database and processing with LLM...\n");
+                await foreach (var text in  session.ChatAsync(new ChatHistory.Message(AuthorRole.User, prompt),inferenceParams))
+
+                {
+                    Console.Write("Response:");
                     Console.Write(text);
                 }
                 conversation += prompt; // Processing the full conversation is not yet implemented, treats each message as a new conversation at this time
                 prompt = "";
                 
+
             }
 
 

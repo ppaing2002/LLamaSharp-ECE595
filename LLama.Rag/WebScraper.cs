@@ -5,26 +5,18 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
+using System.Web;
 
 namespace LLama.Rag
 {
-    class WebScraper
+    class WebScraper : IWebScraper
     {
         private static readonly HttpClient httpClient = new HttpClient();
-        public HashSet<string> visitedUrls = new HashSet<string>();
-        public List<HtmlDocument> documents = new List<HtmlDocument>();
+        public HashSet<string> VisitedUrls { get; } = new HashSet<string>();
+        public List<HtmlDocument> Documents { get; } = new List<HtmlDocument>();
 
-        private WebScraper()
-        {
+        private WebScraper() { }
 
-        }
-
-        /// <summary>
-        /// Asyncronously creates a WebQuery and stores all information related to the query in documents list.
-        /// </summary>
-        /// <param name="url">Url of website to retrieve data from.</param>
-        /// <param name="queryDepth">Number of link levels to evaluate. </param>
-        /// <returns>Returns a WebQuery object</returns>
         public static async Task<WebScraper> CreateAsync(string url, int queryDepth)
         {
             WebScraper instance = new WebScraper();
@@ -34,18 +26,16 @@ namespace LLama.Rag
 
         private async Task FetchContentAsynch(string url, int queryDepth)
         {
-            if (queryDepth < 0 || visitedUrls.Contains(url)) return;
+            if (queryDepth < 0 || VisitedUrls.Contains(url)) return;
 
             try
             {
-                visitedUrls.Add(url);
+                VisitedUrls.Add(url);
                 string pageContent = await httpClient.GetStringAsync(url);
                 HtmlDocument doc = new HtmlDocument();
                 doc.LoadHtml(pageContent);
-                documents.Add(doc);
+                Documents.Add(doc);
 
-
-                // Extract links and follow them if depth allows
                 if (queryDepth > 0)
                 {
                     var links = ExtractLinks(doc, url);
@@ -55,14 +45,13 @@ namespace LLama.Rag
             }
             catch (Exception ex)
             {
-                //Console.WriteLine($"Error scraping {url}: {ex.Message}");
+                Console.WriteLine($"Error scraping {url}: {ex.Message}");
             }
-
         }
 
         private static List<string> ExtractLinks(HtmlDocument doc, string baseUrl)
         {
-            var links = doc.DocumentNode
+            return doc.DocumentNode
                 .SelectNodes("//body//a[@href]")?
                 .Select(node => node.GetAttributeValue("href", ""))
                 .Where(href => !string.IsNullOrEmpty(href))
@@ -70,9 +59,6 @@ namespace LLama.Rag
                 .Where(link => link != null)
                 .Distinct()
                 .ToList() ?? new List<string>();
-
-
-            return links;
         }
 
         private static string NormalizeUrl(string href, string baseUrl)
@@ -86,101 +72,75 @@ namespace LLama.Rag
             return null;
         }
 
-        /// <summary>
-        /// Extracts all visible text from a webpage.
-        /// </summary>
-        /// <param name="minWordLength">Specifies the minimum number of words to in a group to collect, anything less is discarded</param>
-        /// <param name="checkSentences">Performs a rudimentary sentance check. Removes any text with strings of non-text or addresses</param>
-        /// <returns>Returns a list of strings List<strings></returns>
-        public List<string> ExtractVisibleText(int minWordLength, bool checkSentences, bool explodeParagraphs)
+        public async Task<List<string>> ExtractVisibleTextAsync(int minWordLength, bool checkSentences, bool explodeParagraphs)
         {
-            //Select all text from body node
-            List<string> allDocumentText = new List<string>();
-            foreach (HtmlDocument doc in documents)
+            return await Task.Run(() =>
             {
-                var currentDocText = doc.DocumentNode
-                    .SelectNodes("//body//*[not(ancestor::table) and not(self::script or self::style)] | //body//a[not(self::script or self::style)]")?
-                    .Select(node =>
-                    {
-                        // Get text and clean it
-                        string cleanedText = HtmlEntity.DeEntitize(node.InnerText.Trim());
+                List<string> allDocumentText = new List<string>();
+                foreach (HtmlDocument doc in Documents)
+                {
+                    var currentDocText = doc.DocumentNode
+                        .SelectNodes("//body//*[not(ancestor::table) and not(self::script or self::style)] | //body//a[not(self::script or self::style)]")?
+                        .Select(node =>
+                        {
+                            string cleanedText = HtmlEntity.DeEntitize(node.InnerText.Trim());
+                            cleanedText = cleanedText.Replace("\t", " ");
+                            cleanedText = Regex.Replace(cleanedText, @"\s+", " ");
+                            return cleanedText;
+                        })
+                        .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
+                        .ToList() ?? new List<string>();
 
-                        // Remove newlines, tabs, and extra spaces
-                        cleanedText = cleanedText.Replace("\t", " "); // Replace tabs with space
-                                                                      //cleanedText = cleanedText.Replace("\n", ""); // Replaces newlines nothing
-                        cleanedText = Regex.Replace(cleanedText, @"\s+", " "); // Replace multiple spaces with one
+                    allDocumentText.AddRange(currentDocText);
+                }
 
-                        // Apply additional regex (e.g., remove unwanted characters)
-                        //cleanedText = Regex.Replace(cleanedText, @"[^a-zA-Z0-9\s]", ""); // Remove non-alphanumeric character
+                if (explodeParagraphs) allDocumentText = ExplodeParagraphs(allDocumentText, minWordLength);
+                if (checkSentences) allDocumentText = RudimentarySentenceCheck(allDocumentText);
 
-
-                        return cleanedText;
-                    })
-                    .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
-                    .ToList() ?? new List<string>();
-
-                allDocumentText.AddRange(currentDocText);
-            }
-
-            if (checkSentences) allDocumentText = RudimentarySentenceCheck(allDocumentText);
-            if (explodeParagraphs) allDocumentText = ExplodeParagraphs(allDocumentText, minWordLength);
-            return allDocumentText;
+                return allDocumentText.Distinct().ToList();
+            });
         }
-        public List<string> ExtractParagraphs()
+
+        public async Task<List<string>> ExtractParagraphsAsync(bool explodeParagraphs)
         {
-            List<string> paragraphs = new List<string>();
-            foreach (HtmlDocument doc in documents)
+            return await Task.Run(() =>
             {
-                //Select all text from body node
-                var currentDocParagraph = doc.DocumentNode
-                    .SelectNodes("//p//text()")?
-                    .Select(node => HtmlEntity.DeEntitize(node.InnerText.Trim()))
-                    .Where(text => !string.IsNullOrWhiteSpace(text))
-                    .ToList() ?? new List<string>();
-
-                paragraphs.AddRange(currentDocParagraph);
-            }
-
-            return paragraphs;
+                List<string> paragraphs = new List<string>();
+                foreach (HtmlDocument doc in Documents)
+                {
+                    var currentDocParagraph = doc.DocumentNode
+                        .SelectNodes("//p//text()")?
+                        .Select(node => HtmlEntity.DeEntitize(node.InnerText.Trim()))
+                        .Where(text => !string.IsNullOrWhiteSpace(text))
+                        .ToList() ?? new List<string>();
+                    paragraphs.AddRange(currentDocParagraph);
+                }
+                if (explodeParagraphs) paragraphs = ExplodeParagraphs(paragraphs, 1);
+                return paragraphs;
+            });
         }
 
         private static List<string> RudimentarySentenceCheck(List<string> sentences)
         {
-            // Define regex patterns within the method
             List<Regex> sentenceRules = new List<Regex>
-    {
-            new Regex(@"^[A-Za-z0-9]+[\w\s,;:'""-]*", RegexOptions.Compiled | RegexOptions.IgnoreCase), // Contains valid words, no gibberish
-            new Regex(@"[^\W]{2,}", RegexOptions.Compiled), //Removes sequences of non-word characters
-            new Regex(@"\b(\w*:?[/\w\d]+\.){2,}\d+\b", RegexOptions.Compiled) //Remove iP and other adresses 
-
-        };
-
-            List<string> cleanedSentences = new List<string>();
-
-            foreach (string sentence in sentences)
             {
-                if (sentenceRules.All(regex => regex.IsMatch(sentence))) // Apply all regex rules
-                {
-                    cleanedSentences.Add(sentence);
-                }
-            }
-            return cleanedSentences;
+                new Regex(@"^[A-Za-z0-9]+([\w\s,;:'""-]*)\.?", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+                new Regex(@"[^\W]{2,}.*", RegexOptions.Compiled),
+                //new Regex(@"\b(\w*:?[/\w\d]+\.){2,}\d+\b", RegexOptions.Compiled)
+            };
+
+            return sentences.Where(sentence => sentenceRules.All(regex => regex.IsMatch(sentence))).ToList();
         }
 
         private static List<string> ExplodeParagraphs(List<string> paragraphs, int minWordLength)
         {
-            List<string> allSentences = new List<string>();
-            foreach (string paragraph in paragraphs)
-            {
-
-                List<string> paragraphSentences = Regex.Matches(paragraph, @"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\s|^)([A-Z0-9][^.!?]*[.!?])")
-                                     .Cast<Match>()  // Convert MatchCollection to IEnumerable<Match>
-                                     .Select(m => m.Value.Trim())  // Extract matched text
-                                     .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
-                                     .ToList();
-                allSentences.AddRange(paragraphSentences);
-            }
-            return allSentences;
+            return paragraphs
+                .SelectMany(paragraph =>
+                    Regex.Matches(paragraph, @"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\s|^)([A-Z0-9][^.!?]*[.!?])")
+                        .Cast<Match>()
+                        .Select(m => m.Value.Trim()))
+                        .Where(text => !string.IsNullOrWhiteSpace(text) && text.Split(' ').Length >= minWordLength)
+                .ToList();
         }
     }
 }
