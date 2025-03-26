@@ -43,23 +43,17 @@ namespace LLama.Rag
 
             return CosineSimilarity(queryVectorMean, embeddedVectorsMean);
         }
-        public static double ComputeSimilarity(IReadOnlyList<float[]> queryVectors, float[] embeddedVector)
+        public static double ComputeSimilarity(List<float[]> queryVectors, float[] embeddedVector)
         {
             int queryVectorDimension = queryVectors[0].Length;
-            int embeddedVectorsDimension = 1;
+            int embeddedVectorsDimension = embeddedVector.Length;
 
             float[] queryVectorMean = Enumerable.Range(0, queryVectorDimension)
                     .AsParallel()  // Enable parallel processing
                     .Select(i => queryVectors.AsParallel().Average(vec => vec[i]))  // Compute mean per dimension in parallel
                     .ToArray();
 
-            float[] embeddedVectorsMean = Enumerable.Range(0, embeddedVectorsDimension)
-                   .AsParallel()  // Enable parallel processing
-                   .Select(i => embeddedVector.AsParallel().Average())  // Compute mean per dimension in parallel
-                   .ToArray();
-
-
-            return CosineSimilarity(queryVectorMean, embeddedVectorsMean);
+            return CosineSimilarity(queryVectorMean, embeddedVector);
         }
 
     }

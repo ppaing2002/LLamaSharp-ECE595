@@ -12,16 +12,17 @@ namespace LLama.Rag
             string fullModelName = "Llama-3.2-1B-Instruct-Q4_0.gguf";
             string modelPath = @$"C:\Projects\Models\{fullModelName}";
             string embeddingStorage = @$"C:\Projects\Embeddings\Embeddings_{fullModelName}";
-            string startUrl = "https://en.wikipedia.org/wiki/Aluminium_alloy";
-            bool overWrite = false;
-            
-        
+
+
+
             //WebscrapingParameters
+            string startUrl = "https://en.wikipedia.org/wiki/Aluminium_alloy"; 
+            bool overWrite = false;
             int depth = 0;//Scrape only the webpage provided and links up to depth. 
             int minWordLength = 5; //Specify the minimum number of words in a block that should be scraped.
             bool checkSentences = true;
             bool explodeParagraphs = true;
-           
+
 
             var modelparams = new ModelParams(modelPath)
             {
@@ -51,14 +52,17 @@ namespace LLama.Rag
                     Url = Site.Url,
                     Title = Site.Title,
                     SourceType = "Website",
+                    Summary = "",
+                    KeyWords =[""],
                     TextToEmbed = await ScrapedSites.ExtractVisibleTextAsync(Site, minWordLength, checkSentences, explodeParagraphs) //Fact Generation
+                    
                     
                 };
                 await embeddingHandler.setEmbeddings(source, overWrite);
              
             }
 
-            //Load the embeddings 
+            //Load the embeddings and embedding sources.
             DataTable embeddings = await embeddingHandler.getAllEmbeddings();
 
 
@@ -75,9 +79,11 @@ namespace LLama.Rag
             {
                 string query = Console.ReadLine();
                 if (string.IsNullOrWhiteSpace(query)) break; // Easy way to quit out
-                var queryEmbeddings = await embedder.GetEmbeddings(query);
+                var queryEmbeddings = (List<float[]>)await embedder.GetEmbeddings(query);
 
+               
                 // Get top n matches from vector db, Comparinges  ranks by similarity
+                //var infotable = ComputeSimilarityScores(embeddings, queryEmbeddings);
                 var n_top_matches = 5;
                 var topMatches = embeddings.AsEnumerable()
                     .OrderByDescending(row => SimilaryMeasures.ComputeSimilarity(queryEmbeddings, row.Field<float[]>("EmbeddingVector")))
@@ -106,9 +112,12 @@ namespace LLama.Rag
                 };
 
                 Console.WriteLine($"The {n_top_matches} top matches to the query are:");
-                for (int i = 0; i < n_top_matches; i++)
+                if (topMatches.Count > 0)
                 {
-                    Console.WriteLine($"\tMatch {i}:{topMatches[i]}");
+                    for (int i = 0; i < n_top_matches; i++)
+                    {
+                        Console.WriteLine($"\tMatch {i}:{topMatches[i]}");
+                    }
                 }
                 // Execute conversation with modified prompt including top n matches
                 Console.WriteLine("\nQuerying database and processing with LLM...\n");
@@ -128,6 +137,30 @@ namespace LLama.Rag
             
         }
 
+        private static DataTable ComputeSimilarityScores(DataTable embeddings, List<float[]> queryEmbeddings)
+        {
+            // Clone the original DataTable structure and add a new "Score" column
+            DataTable augmentedTable = embeddings.Clone();
+            augmentedTable.Columns.Add("Score", typeof(float));
 
+            // Iterate over each row and compute similarity
+            foreach (DataRow row in embeddings.Rows)
+            {
+                var embeddingVector = row.Field<float[]>("EmbeddingVector");
+
+                // Compute similarity if embedding exists; otherwise, default to -1
+                float similarityScore = (float)((embeddingVector != null)
+                    ? SimilaryMeasures.ComputeSimilarity(queryEmbeddings, embeddingVector)
+                    : -1f); // Assign a default score for missing embeddings
+
+                // Copy the row and set the computed score
+                DataRow newRow = augmentedTable.NewRow();
+                newRow.ItemArray = row.ItemArray; // Copy all existing columns
+                newRow["Score"] = similarityScore; // Add computed similarity score
+                augmentedTable.Rows.Add(newRow);
+            }
+
+            return augmentedTable;
+        }
     }
 }

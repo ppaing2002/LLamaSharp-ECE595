@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using System.Data;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.IO;
+
 
 namespace LLama.Rag
 {
@@ -8,9 +10,12 @@ namespace LLama.Rag
     {
 
         private LLamaEmbedder Embedder { get; set; }
+        
         private readonly AppDbContext _db;
         public EmbeddingHandler(LLamaEmbedder embedder, String storageFolder)
         {
+     
+            
             Embedder = embedder;
             _db = new AppDbContext(storageFolder);
             bool created = _db.Database.EnsureCreated();
@@ -52,7 +57,7 @@ namespace LLama.Rag
 
 
                     // Delete the existing source and related embeddings
-                    Console.WriteLine($"Creating Embeddings for:({existingSource.SourceType}) - {existingSource.Title}");
+                    Console.WriteLine($"Updating Embeddings for:({existingSource.SourceType}) - {existingSource.Title}");
                     _db.Embeddings.RemoveRange(existingEmbeddings);
                     _db.EmbeddingSources.Remove(existingSource);
                     _db.SaveChanges();
@@ -78,11 +83,12 @@ namespace LLama.Rag
                 {
                     if (Embedder.Context.BatchSize >= Embedder.Context.Tokenize(text).Length)
                     {
+                        
                         Embedding embedding = new Embedding()
                         {
                             SourceId = source.Id,
                             PlainText = text,
-                            EmbeddingVector = ConvertEmbeddingsToByteArray(await Embedder.GetEmbeddings(text))
+                            EmbeddingVector = AveragePoolEmbeddings((List<float[]>)await Embedder.GetEmbeddings(text)) //ConvertEmbeddingsToByteArray()
                         };
                         _db.Embeddings.Add(embedding);
                     }
@@ -93,6 +99,7 @@ namespace LLama.Rag
             
 
         }
+        
         public async Task<DataTable> getAllEmbeddings()
         {
             DataTable dt = new DataTable();
@@ -113,7 +120,7 @@ namespace LLama.Rag
                     embedding.Id,
                     embedding.SourceId,
                     embedding.PlainText,
-                    ConvertByteArrayToEmbeddings(embedding.EmbeddingVector)
+                    embedding.EmbeddingVector
                 );
             }
 
@@ -129,9 +136,11 @@ namespace LLama.Rag
                 foreach (var value in embedding)
                 {
                     byte[] byteArray = BitConverter.GetBytes(value);
+                    
                     byteList.AddRange(byteArray);
                 }
             }
+            
 
             return byteList.ToArray(); // Convert the List<byte> to a byte array.
         }
@@ -158,6 +167,8 @@ namespace LLama.Rag
             dt.Columns.Add("URL", typeof(string)); // Source URL
             dt.Columns.Add("Title", typeof(string)); // Source Title
             dt.Columns.Add("DateCreated", typeof(string)); // Date of source creation
+            dt.Columns.Add("Summary", typeof(string)); // Source Summary
+            dt.Columns.Add("SummaryEmbeddings", typeof(string)); // Summary Embeddings
             dt.Columns.Add("KeyWords", typeof(string)); // Applicable Keywords for source
             dt.Columns.Add("KeyWordEmbeddings", typeof(string)); // Keyword Embeddings
 
@@ -172,13 +183,31 @@ namespace LLama.Rag
                     source.SourceType,
                     source.Url,
                     source.Title,
+                    source.Summary,
+                    source.SummaryEmbeddings,
                     source.DateCreated,
                     source.KeyWords,
-                    ConvertByteArrayToEmbeddings(source.KeyWordEmbeddings)
+                    source.KeyWordEmbeddings
                 );
             }
 
             return dt;
+        }
+        private float[] AveragePoolEmbeddings(List<float[]> embeddings)
+        {
+            if (embeddings == null || embeddings.Count == 0)
+                throw new ArgumentException("Embeddings list cannot be null or empty.");
+
+            int vectorSize = embeddings[0].Length;
+
+            // Ensure all embeddings have the same length
+            if (embeddings.Any(e => e.Length != vectorSize))
+                throw new InvalidOperationException("All embeddings must have the same length.");
+
+            // Compute the average element-wise
+            return Enumerable.Range(0, vectorSize)
+                             .Select(i => embeddings.Average(e => e[i])) // Average each dimension separately
+                             .ToArray();
         }
     } 
 
@@ -189,9 +218,12 @@ namespace LLama.Rag
         public string SourceType { get; set; } = string.Empty; //"Website", Only supports website currently"
         public string Url { get; set; } = string.Empty; // URL if applicable
         public string Title { get; set; } = string.Empty; // Title of the source
+        public string Summary { get; set; } = string.Empty; // Title of the source
+        public string SummaryEmbeddings { get; set; } = string.Empty; // Title of the source
         internal string DateCreated { get; set; } = string.Empty; // Date of creation
         public string[] KeyWords { get; set; } = Array.Empty<string>(); // Keywords for searching
-        public byte[] KeyWordEmbeddings { get; set; } = Array.Empty<byte>(); // Keyword embeddings
+        public float[] KeyWordEmbeddings { get; set; } = Array.Empty<float>();// Keyword embeddings
+
         //Navigation property 
         public List<Embedding> Embeddings { get; set; } = new();
 
@@ -205,8 +237,8 @@ namespace LLama.Rag
     {
         public int Id { get; set; } //Primary Key
         internal int SourceId { get; set; } //Foreign Key
-        public string PlainText { get; set; }
-        public byte[] EmbeddingVector { get; set; }
+        public string PlainText { get; set; } //Plain Text Quote
+        public float[] EmbeddingVector { get; set; } //Embedding Vector. Would be good to compress this somehow
 
         //Navigation property 
         public EmbeddingSource EmbeddingSource { get; set; } = null!;

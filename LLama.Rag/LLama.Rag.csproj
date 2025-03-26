@@ -20,4 +20,8 @@
     <ProjectReference Include="..\LLama\LLamaSharp.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="SourceFiles\Embeddings\" />
+  </ItemGroup>
+
 </Project>
