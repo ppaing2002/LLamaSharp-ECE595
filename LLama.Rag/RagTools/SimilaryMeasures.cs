@@ -5,16 +5,16 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace LLama.Rag
+namespace LLama.Rag.RagTools
 {
     class SimilaryMeasures
     {
         public static double CosineSimilarity(float[] vector1, float[] vector2)
         {
             double dotProduct = 0.0, magnitude1 = 0.0, magnitude2 = 0.0;
-            int length = Math.Min(vector1.Length, vector2.Length);
+            var length = Math.Min(vector1.Length, vector2.Length);
 
-            for (int i = 0; i < length; i++)
+            for (var i = 0; i < length; i++)
             {
                 dotProduct += vector1[i] * vector2[i];
                 magnitude1 += Math.Pow(vector1[i], 2);
@@ -27,15 +27,15 @@ namespace LLama.Rag
 
         public static double ComputeSimilarity(IReadOnlyList<float[]> queryVectors, List<float[]> embeddedVectors)
         {
-            int queryVectorDimension = queryVectors[0].Length;
-            int embeddedVectorsDimension = embeddedVectors[0].Length;
+            var queryVectorDimension = queryVectors[0].Length;
+            var embeddedVectorsDimension = embeddedVectors[0].Length;
 
-            float[] queryVectorMean = Enumerable.Range(0, queryVectorDimension)
+            var queryVectorMean = Enumerable.Range(0, queryVectorDimension)
                     .AsParallel()  // Enable parallel processing
                     .Select(i => queryVectors.AsParallel().Average(vec => vec[i]))  // Compute mean per dimension in parallel
                     .ToArray();
 
-            float[] embeddedVectorsMean = Enumerable.Range(0, embeddedVectorsDimension)
+            var embeddedVectorsMean = Enumerable.Range(0, embeddedVectorsDimension)
                    .AsParallel()  // Enable parallel processing
                    .Select(i => embeddedVectors.AsParallel().Average(vec => vec[i]))  // Compute mean per dimension in parallel
                    .ToArray();
@@ -45,10 +45,10 @@ namespace LLama.Rag
         }
         public static double ComputeSimilarity(List<float[]> queryVectors, float[] embeddedVector)
         {
-            int queryVectorDimension = queryVectors[0].Length;
-            int embeddedVectorsDimension = embeddedVector.Length;
+            var queryVectorDimension = queryVectors[0].Length;
+            var embeddedVectorsDimension = embeddedVector.Length;
 
-            float[] queryVectorMean = Enumerable.Range(0, queryVectorDimension)
+            var queryVectorMean = Enumerable.Range(0, queryVectorDimension)
                     .AsParallel()  // Enable parallel processing
                     .Select(i => queryVectors.AsParallel().Average(vec => vec[i]))  // Compute mean per dimension in parallel
                     .ToArray();

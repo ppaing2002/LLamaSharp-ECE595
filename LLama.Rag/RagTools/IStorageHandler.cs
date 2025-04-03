@@ -6,26 +6,26 @@ using System.Threading.Tasks;
 using System.Data;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace LLama.Rag
+namespace LLama.Rag.RagTools
 {
-    interface IEmbeddingHandler
+    interface IStorageHandler
     {
         /// <summary>
         /// 
         /// </summary>
         /// <returns>Returns a DataTable of all embeddings</returns>
-        Task<DataTable> getAllEmbeddings();
+        Task<DataTable> GetAllChunks();
 
         /// <summary>
         /// 
         /// </summary>
         /// <returns>Returns a DataTable of all embedding sources</returns>
-        Task<DataTable> getAllEmbeddingSources();
+        Task<DataTable> GetAllSources();
 
         //Need to implement
-        Task<DataTable> getEmbeddingsBySourceID(int Id);
+        Task<DataTable> GetChunksBySourceID(int Id);
 
-        Task setEmbeddings(EmbeddingSource Source, bool Overwrite);
+        Task SaveSource(SourceFile Source, bool Overwrite);
 
     }
 }

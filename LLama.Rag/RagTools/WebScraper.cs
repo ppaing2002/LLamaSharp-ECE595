@@ -9,7 +9,7 @@ using System.Web;
 using System.Data;
 using System.Reflection;
 
-namespace LLama.Rag
+namespace LLama.Rag.RagTools
 {
     class WebScraper : IWebScraper
     {
@@ -22,7 +22,7 @@ namespace LLama.Rag
 
         public static async Task<WebScraper> CreateAsync(string url, int queryDepth)
         {
-            WebScraper instance = new WebScraper();
+            var instance = new WebScraper();
             await instance.FetchContentAsynch(url, queryDepth);
             return instance;
         }
@@ -34,15 +34,15 @@ namespace LLama.Rag
             try
             {
                 VisitedUrls.Add(url);
-                string pageContent = await httpClient.GetStringAsync(url);
-                HtmlDocument doc = new HtmlDocument();
+                var pageContent = await httpClient.GetStringAsync(url);
+                var doc = new HtmlDocument();
                 doc.LoadHtml(pageContent);
 
 
                 var titleNode = doc.DocumentNode.SelectSingleNode("//title");
-                string title = titleNode != null ? titleNode.InnerHtml : "N/A";
+                var title = titleNode != null ? titleNode.InnerHtml : "N/A";
 
-                IWebScraper.WebsiteData site = new IWebScraper.WebsiteData()
+                var site = new IWebScraper.WebsiteData()
                 {
                     Url = url,
                     Document = doc,
@@ -96,7 +96,7 @@ namespace LLama.Rag
                         .SelectNodes("//body//*[not(ancestor::table) and not(self::script or self::style)] | //body//a[not(self::script or self::style)]")?
                         .Select(node =>
                         {
-                            string cleanedText = HtmlEntity.DeEntitize(node.InnerText.Trim());
+                            var cleanedText = HtmlEntity.DeEntitize(node.InnerText.Trim());
                             cleanedText = cleanedText.Replace("\t", " ");
                             cleanedText = Regex.Replace(cleanedText, @"\s+", " ");
                             return cleanedText;
@@ -132,7 +132,7 @@ namespace LLama.Rag
 
         private static List<string> RudimentarySentenceCheck(List<string> sentences)
         {
-            List<Regex> sentenceRules = new List<Regex>
+            var sentenceRules = new List<Regex>
             {
                 new Regex(@"^[A-Za-z0-9]+([\w\s,;:'""-]*)\.?", RegexOptions.Compiled | RegexOptions.IgnoreCase),
                 new Regex(@"[^\W]{2,}.*", RegexOptions.Compiled),

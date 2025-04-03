@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
 
-namespace LLama.Rag
+namespace LLama.Rag.RagTools
 {
     public interface IWebScraper
     {
