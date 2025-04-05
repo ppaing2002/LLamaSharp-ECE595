@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using CommunityToolkit.HighPerformance.Buffers;
 using LLama.Exceptions;
 
 namespace LLama.Native
@@ -53,6 +54,11 @@ namespace LLama.Native
         /// Get the number of heads in this model
         /// </summary>
         public int HeadCount => llama_model_n_head(this);
+
+        /// <summary>
+        /// Get the number of KV heads in this model
+        /// </summary>
+        public int KVHeadCount => llama_model_n_head(this);
 
         /// <summary>
         /// Returns true if the model contains an encoder that requires llama_encode() call
@@ -247,12 +253,12 @@ namespace LLama.Native
         private static int llama_model_meta_val_str(SafeLlamaModelHandle model, string key, Span<byte> dest)
         {
             var bytesCount = Encoding.UTF8.GetByteCount(key);
-            var bytes = ArrayPool<byte>.Shared.Rent(bytesCount);
+            using var bytes = SpanOwner<byte>.Allocate(bytesCount);
 
             unsafe
             {
                 fixed (char* keyPtr = key)
-                fixed (byte* bytesPtr = bytes)
+                fixed (byte* bytesPtr = bytes.Span)
                 fixed (byte* destPtr = dest)
                 {
                     // Convert text into bytes
@@ -309,6 +315,14 @@ namespace LLama.Native
         /// <returns></returns>
         [DllImport(NativeApi.libraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int llama_model_n_head(SafeLlamaModelHandle model);
+
+        /// <summary>
+        /// Get the number of KV heads in this model
+        /// </summary>
+        /// <param name="model"></param>
+        /// <returns></returns>
+        [DllImport(NativeApi.libraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int llama_model_n_head_kv(SafeLlamaModelHandle model);
 
         /// <summary>
         /// Get a string describing the model type
@@ -471,33 +485,27 @@ namespace LLama.Native
 
             // Convert string to bytes, adding one extra byte to the end (null terminator)
             var bytesCount = encoding.GetByteCount(text);
-            var bytes = ArrayPool<byte>.Shared.Rent(bytesCount + 1);
-            try
+            using var bytes = SpanOwner<byte>.Allocate(bytesCount + 1, AllocationMode.Clear);
+
+            unsafe
             {
-                unsafe
+                fixed (char* textPtr = text)
+                fixed (byte* bytesPtr = bytes.Span)
                 {
-                    fixed (char* textPtr = text)
-                    fixed (byte* bytesPtr = bytes)
+                    // Convert text into bytes
+                    encoding.GetBytes(textPtr, text.Length, bytesPtr, bytes.Length);
+
+                    // Tokenize once with no output, to get the token count. Output will be negative (indicating that there was insufficient space)
+                    var count = -NativeApi.llama_tokenize(llama_model_get_vocab(this), bytesPtr, bytesCount, (LLamaToken*)IntPtr.Zero, 0, addBos, special);
+
+                    // Tokenize again, this time outputting into an array of exactly the right size
+                    var tokens = new LLamaToken[count];
+                    fixed (LLamaToken* tokensPtr = tokens)
                     {
-                        // Convert text into bytes
-                        encoding.GetBytes(textPtr, text.Length, bytesPtr, bytes.Length);
-
-                        // Tokenize once with no output, to get the token count. Output will be negative (indicating that there was insufficient space)
-                        var count = -NativeApi.llama_tokenize(llama_model_get_vocab(this), bytesPtr, bytesCount, (LLamaToken*)IntPtr.Zero, 0, addBos, special);
-
-                        // Tokenize again, this time outputting into an array of exactly the right size
-                        var tokens = new LLamaToken[count];
-                        fixed (LLamaToken* tokensPtr = tokens)
-                        {
-                            _ = NativeApi.llama_tokenize(llama_model_get_vocab(this), bytesPtr, bytesCount, tokensPtr, count, addBos, special);
-                            return tokens;
-                        }
+                        _ = NativeApi.llama_tokenize(llama_model_get_vocab(this), bytesPtr, bytesCount, tokensPtr, count, addBos, special);
+                        return tokens;
                     }
                 }
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(bytes, true);
             }
         }
         #endregion
@@ -603,15 +611,22 @@ namespace LLama.Native
         /// Get the default chat template. Returns nullptr if not available
         /// If name is NULL, returns the default chat template
         /// </summary>
-        /// <param name="name"></param>
+        /// <param name="name">The name of the template, in case there are many or differently named. Set to 'null' for the default behaviour of finding an appropriate match.</param>
+        /// <param name="strict">Setting this to true will cause the call to throw if no valid templates are found.</param>
         /// <returns></returns>
-        public string? GetTemplate(string? name = null)
+        public string? GetTemplate(string? name = null, bool strict = true)
         {
             unsafe
             {
                 var bytesPtr = llama_model_chat_template(this, name);
                 if (bytesPtr == null)
-                    return null;
+                {
+                    if (strict)
+                        throw new TemplateNotFoundException(name ?? "default template");
+                    else
+                        return null;
+
+                }
 
                 // Find null terminator
                 var spanBytes = new Span<byte>(bytesPtr, int.MaxValue);
